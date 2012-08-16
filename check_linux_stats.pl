@@ -37,6 +37,7 @@
 #
 # 1.3~dev
 #  * code cleanup
+#  * added swapping and removed swap perfdata from paging
 #
 # 1.2
 #  initially imported into Markus Frosch's repo
@@ -54,13 +55,13 @@ use Data::Dumper;
 use vars qw($script_name $script_version $o_sleep $o_pattern $o_cpu
   $o_procs $o_process $o_mem $o_net $o_disk $o_io $o_load
   $o_file $o_socket $o_paging $o_help $o_version $o_warning
-  $o_critical $o_unit);
+  $o_critical $o_unit $o_swapping);
 use strict;
 
 # --------------------------- globals -------------------------- #
 
 $script_name    = "check_linux_stats";
-$script_version = "1.3";
+$script_version = "1.3~dev";
 $o_help         = undef;
 $o_pattern      = undef;
 $o_version      = undef;
@@ -105,6 +106,9 @@ elsif ($o_process) {
 }
 elsif ($o_paging) {
     check_paging();
+}
+elsif ($o_swapping) {
+    check_swapping();
 }
 else {
     print "no check selected!\n\n";
@@ -608,8 +612,36 @@ sub check_paging {
         }
         print "Paging $status : In:$page->{pgpgin}, Out:$page->{pgpgout} |".
               "pgpgin=$page->{pgpgin};$warn_in;$crit_in;0 ".
-              "pgpgout=$page->{pgpgout};$warn_out;$crit_out;0 ".
-              "pswpin=$page->{pswpin} pswpout=$page->{pswpout}";
+              "pgpgout=$page->{pgpgout};$warn_out;$crit_out;0 ";
+    }
+    else {
+        print "No data";
+    }
+}
+
+sub check_swapping {
+    my $lxs = Sys::Statistics::Linux->new( pgswstats => 1 );
+    $lxs->init;
+    sleep $o_sleep;
+    my $stat = $lxs->get;
+    if ( defined( $stat->pgswstats ) ) {
+        $status = "OK";
+        my $page = $stat->pgswstats;
+        my ( $warn_in, $warn_out ) = split( /,/, $o_warning );
+        my ( $crit_in, $crit_out ) = split( /,/, $o_critical );
+        if (   ( $page->{pswpin} >= $crit_in )
+            || ( $page->{pswpout} >= $crit_out ) )
+        {
+            $status = "CRITICAL";
+        }
+        elsif (( $page->{pswpin} >= $warn_in )
+            || ( $page->{pswpout} >= $warn_out ) )
+        {
+            $status = "WARNING";
+        }
+        print "Swapping $status : In:$page->{pswpin}, Out:$page->{pswpout} |".
+              "pgpgin=$page->{pswpin};$warn_in;$crit_in;0 ".
+              "pgpgout=$page->{pswpout};$warn_out;$crit_out;0 ";
     }
     else {
         print "No data";
@@ -617,7 +649,7 @@ sub check_paging {
 }
 
 sub usage {
-    print "Usage: $0 -C|-P|-M|-N|-D|-I|-L|-F|-S|-w -p <pattern> ".
+    print "Usage: $0 -C|-P|-M|-N|-D|-I|-L|-F|-S|-O|-w -p <pattern> ".
           "-w <warning> -c <critical> [-s <sleep>] [-u <unit>] [-V] [-h]\n";
 }
 
@@ -641,12 +673,14 @@ sub help {
     -L, --load=LOAD AVERAGE
     -F, --file=FILE STATS
     -S, --socket=SOCKET STATS
-    -W, --paging=PAGING AND SWAPPING STATS
+    -W, --paging=PAGING STATS (disk/mem io)
+    -O, --swapping=SWAPPING STATS (swap/mem io)
     -p, --pattern
           eth0,eth1...sda1,sda2.../usr,/tmp
     -w, --warning
     -c, --critical
     -s, --sleep
+          seconds to sleep for measuring
     -u, --unit
                %, KB, MB or GB left on disk usage, default : MB
            REQS OR BYTES on disk io statistics, default : REQS
@@ -659,6 +693,7 @@ sub help {
     Disk usage                      : perl check_linux_stats.pl -D -w 95 -c 100 -u % -p /tmp,/usr,/var
     Load average                    : perl check_linux_stats.pl -L -w 10,8,5 -c 20,18,15
     Paging statistics               : perl check_linux_stats.pl -W -w 10,1000 -c 20,2000 -s 3
+    Swapping statistics             : perl check_linux_stats.pl -O -w 10,50 -c 20,100 -s 3
     Process statistics              : perl check_linux_stats.pl -P -w 100 -c 200
     I/O statistics on disk device   : perl check_linux_stats.pl -I -w 95 -c 100 -p sda1,sda4,sda5,sda6
     Network usage                   : perl check_linux_stats.pl -N -w 10000 -c 100000000 -p eth0
@@ -695,6 +730,8 @@ sub check_options {
         'socket'     => \$o_socket,
         'W'          => \$o_paging,
         'paging'     => \$o_paging,
+        'O'          => \$o_swapping,
+        'swapping'   => \$o_swapping,
         'V'          => \$o_version,
         'version'    => \$o_version,
         'p:s'        => \$o_pattern,
