@@ -1,15 +1,25 @@
 #!/usr/bin/perl
-# ---------------------------------------------------- #
-# File : check_linux_stats
-# Author : Damien SIAUD
-# Date : 07/12/2009
-# Rev. Date : 07/05/2010
-# ---------------------------------------------------- #
-# This script require Sys::Statistics::Linux
+########################################################################
+# check_linux_stats
+# written by  : Damien SIAUD <noemailfound>
+# modified by : Markus Frosch <markus@lazyfrosch.de>
 #
-# Plugin check for nagios 
+# version     : 1.3~dev
+# last change : 2012-08-16
 #
-# License Information:
+# INFO #################################################################
+#
+# You will find this plugin on:
+#  https://github.com/lazyfrosch/icinga-plugins
+#
+# This plugins allow the checking and measuring of
+# various Linux statistic values.
+#
+# This script requires Sys::Statistics::Linux from CPAN
+# see http://search.cpan.org/dist/Sys-Statistics-Linux/
+#
+# LICENSE ##############################################################
+#
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 3 of the License, or
@@ -23,7 +33,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>. 
 #
-# ---------------------------------------------------- # 
+# CHANGELOG ############################################################
+#
+# 1.3~dev
+#  * 
+#
+# 1.2
+#  initially imported into Markus Frosch's repo
+#  source: http://exchange.nagios.org/directory/Plugins/Operating-Systems/Linux/check_linux_stats/details
+#
+########################################################################
 
 use lib "/usr/lib/nagios/plugins";
 use utils qw($TIMEOUT %ERRORS &print_revision &support);
@@ -38,7 +57,7 @@ use strict;
 # --------------------------- globals -------------------------- #
 
 $script_name = "check_linux_stats";
-$script_version = "1.2";
+$script_version = "1.3~dev";
 $o_help = undef;
 $o_pattern = undef;
 $o_version = undef;
