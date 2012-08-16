@@ -38,6 +38,9 @@
 # 1.3~dev
 #  * code cleanup
 #  * added swapping and removed swap perfdata from paging
+#  * netstats rewritten
+#    now with pkg counters, better perfdata, statfile
+#    for better deltas, units
 #
 # 1.2
 #  initially imported into Markus Frosch's repo
@@ -50,12 +53,13 @@ use utils qw($TIMEOUT %ERRORS &print_revision &support);
 use Getopt::Long;
 use Sys::Statistics::Linux;
 use Sys::Statistics::Linux::Processes;
+use Sys::Statistics::Linux::NetStats;
 use Data::Dumper;
 
 use vars qw($script_name $script_version $o_sleep $o_pattern $o_cpu
   $o_procs $o_process $o_mem $o_net $o_disk $o_io $o_load
   $o_file $o_socket $o_paging $o_help $o_version $o_warning
-  $o_critical $o_unit $o_swapping);
+  $o_critical $o_unit $o_swapping $o_statfile);
 use strict;
 
 # --------------------------- globals -------------------------- #
@@ -499,59 +503,114 @@ sub check_io {
 }
 
 sub check_net {
-    my $lxs = Sys::Statistics::Linux->new( netstats => 1 );
-    $lxs->init;
-    sleep $o_sleep;
-    my $stat = $lxs->get;
+    my $stat;
+    my $lxs;
+    if(defined($o_statfile)) {
+        $lxs = Sys::Statistics::Linux::NetStats->new(initfile => $o_statfile);
+        $lxs->init;
+        $stat = $lxs->get;
+    }
+    else {
+        $lxs = Sys::Statistics::Linux->new( netstats => 1 );
+        $lxs->init;
+        sleep $o_sleep;
+        $stat = $lxs->get;
+        $stat = $stat->netstats;
+    }
 
     my $return_str = "";
     my $perfdata   = "";
-    if ( defined( $stat->netstats ) ) {
-        $status = "OK";
-        my $net = $stat->netstats;
+    if ( defined( $stat ) ) {
+        $status = "UNKOWN";
+        my $net = $stat;
         if ( !defined($o_pattern) ) { $o_pattern = 'all'; }
 
         my $checkthis;
         map { $checkthis->{$_}++ } split( /,/, $o_pattern );
 
+        my ($traf_crit, $pkg_crit, $err_crit) = split( /,/, $o_critical);
+        my ($traf_warn, $pkg_warn, $err_warn) = split( /,/, $o_warning);
+
+        # unit handling
+        my $unit_calc;
+        if($o_unit eq "b")    { $unit_calc = 8;          }
+        elsif($o_unit eq "B") { $unit_calc = 1;          }
+        elsif($o_unit eq "Kb"){ $unit_calc = 0.008;      }# byte -> Kbit  | x * 8 / 1000
+        elsif($o_unit eq "KB"){ $unit_calc = 0.001;      }# byte -> Kbyte | x / 1000
+        elsif($o_unit eq "Mb"){ $unit_calc = 0.000008;   }# byte -> Mbit  | x * 8 / 1000000
+        elsif($o_unit eq "MB"){ $unit_calc = 0.000001;   }# byte -> Mbyte | x / 10000000
+        elsif($o_unit eq "Gb"){ $unit_calc = 0.000000008;}# byte -> Mbyte | x * 8 / 10000000000
+        elsif($o_unit eq "GB"){ $unit_calc = 0.000000001;}# byte -> Mbyte | x / 10000000000
+        else {
+            $o_unit = "Kb";
+            $unit_calc = 0.008;
+        }
+        
         my $crit = 0;    #critical counter
         my $warn = 0;    #warning counter
         foreach my $device ( keys(%$net) ) {
-            my $txbyt   = $net->{$device}->{txbyt};
+            # the returns are bytes/sec or packages/sec
+            my $txbyt   = $net->{$device}->{txbyt} * $unit_calc;
             my $rxerrs  = $net->{$device}->{rxerrs};
-            my $ttbyt   = $net->{$device}->{ttbyt};
             my $txerrs  = $net->{$device}->{txerrs};
             my $txdrop  = $net->{$device}->{txdrop};
             my $txcolls = $net->{$device}->{txcolls};
-            my $rxbyt   = $net->{$device}->{rxbyt};
+            my $rxbyt   = $net->{$device}->{rxbyt} * $unit_calc;
             my $rxdrop  = $net->{$device}->{rxdrop};
+            my $rxpcks  = $net->{$device}->{rxpcks};
+            my $txpcks  = $net->{$device}->{txpcks};
 
             if (   defined( $checkthis->{$device} )
                 || defined( $checkthis->{all} ) )
             {
-                if    ( $ttbyt >= $o_critical ) { $crit++; }
-                elsif ( $ttbyt >= $o_warning )  { $warn++; }
+                $status = "OK";
+                my $tmp_str;
 
-                $return_str .= $device . ":" . $ttbyt . "KB ";
+                if(defined($traf_crit) && ($txbyt >= $traf_crit || $rxbyt >= $traf_crit)) {
+                    $tmp_str .= "traffic critical (in:${rxbyt}$o_unit/s out:${txbyt}$o_unit/s out:) ";
+                    $crit++;
+                }
+                elsif(defined($traf_warn) && ($txbyt >= $traf_warn || $rxbyt >= $traf_warn)) {
+                    $tmp_str .= "traffic warning (in:${rxbyt}$o_unit/s out:${txbyt}$o_unit/s out:) ";
+                    $warn++;
+                }
+
+                if(defined($pkg_crit) && ($txpcks >= $pkg_crit || $rxpcks >= $pkg_crit)) {
+                    $tmp_str .= "packages critical (in:$rxpcks/s out:$txpcks/s) ";
+                    $crit++;
+                }
+                elsif(defined($pkg_warn) && ($txpcks >= $pkg_warn || $rxpcks >= $pkg_warn)) {
+                    $tmp_str .= "packages warning (in:$rxpcks/s out:$txpcks/s) ";
+                    $warn++;
+                }
+
+                if(defined($err_crit) && ($rxerrs >= $err_crit || $txerrs >= $err_crit)) {
+                    $tmp_str .= "error counters critical (in:$rxerrs/s out:$txerrs/s) ";
+                    $crit++;
+                }
+                elsif(defined($err_warn) && ($rxerrs >= $err_warn || $txerrs >= $err_warn)) {
+                    $tmp_str .= "error counters warning (in:$rxerrs/s out:$txerrs/s) ";
+                    $warn++;
+                }
+
+                $return_str .= "$device: ";
+                if($tmp_str) { $return_str .= $tmp_str." "; }
+                else         { $return_str .= "OK "; }
+
                 $perfdata   .= " "
-                  . $device
-                  . "_txbyt="
-                  . $txbyt . "KB "
-                  . $device
-                  . "_txerrs="
-                  . $txerrs . "KB "
-                  . $device
-                  . "_rxbyt="
-                  . $rxbyt . "KB "
-                  . $device
-                  . "_rxerrs="
-                  . $rxerrs . "KB";
+                  ."${device}_rxbyt=$rxbyt$o_unit;$traf_warn;$traf_crit;0 "
+                  ."${device}_txbyt=$txbyt$o_unit;$traf_warn;$traf_crit;0 "
+                  ."${device}_rxpcks=$rxpcks;$pkg_warn;$pkg_crit;0 "
+                  ."${device}_txpcks=$txpcks;$pkg_warn;$pkg_crit;0 "
+                  ."${device}_rxerrs=$rxerrs;$err_warn;$err_crit;0 "
+                  ."${device}_txerrs=$txerrs;$err_warn;$err_crit;0 "
+                ;
             }
         }
 
         if    ( $crit > 0 ) { $status = "CRITICAL"; }
         elsif ( $warn > 0 ) { $status = "WARNING"; }
-        print "NET USAGE $status $return_str |$perfdata";
+        print "NET USAGE $status $return_str|$perfdata";
     }
 }
 
@@ -650,7 +709,7 @@ sub check_swapping {
 
 sub usage {
     print "Usage: $0 -C|-P|-M|-N|-D|-I|-L|-F|-S|-O|-w -p <pattern> ".
-          "-w <warning> -c <critical> [-s <sleep>] [-u <unit>] [-V] [-h]\n";
+          "-w <warning> -c <critical> [-s <sleep>] [-u <unit>] [-f <filename>] [-V] [-h]\n";
 }
 
 sub version {
@@ -679,11 +738,18 @@ sub help {
           eth0,eth1...sda1,sda2.../usr,/tmp
     -w, --warning
     -c, --critical
+          for paging/swapping: in,out
+          for netstat: bytes,packages,errors (in the unit specified)
     -s, --sleep
           seconds to sleep for measuring
     -u, --unit
-               %, KB, MB or GB left on disk usage, default : MB
-           REQS OR BYTES on disk io statistics, default : REQS
+          %, KB, MB or GB left on disk usage, default : MB
+          REQS OR BYTES on disk io statistics, default : REQS
+          b B Kb KB Mb MB Gb GB for net stats, default : MB
+    -f, --statfile
+          used for delta generation of net stats, sleep is
+          not used when specified (delta is calcutated with
+          the stat data of the last run)
     -V, --version
           print version number
 
@@ -696,7 +762,8 @@ sub help {
     Swapping statistics             : perl check_linux_stats.pl -O -w 10,50 -c 20,100 -s 3
     Process statistics              : perl check_linux_stats.pl -P -w 100 -c 200
     I/O statistics on disk device   : perl check_linux_stats.pl -I -w 95 -c 100 -p sda1,sda4,sda5,sda6
-    Network usage                   : perl check_linux_stats.pl -N -w 10000 -c 100000000 -p eth0
+    Network usage    with statfile  : perl check_linux_stats.pl -N -w 1000,500,1 -c 20000,1000,10 -p eth0 -u Kb -f /tmp/linuxstat_net
+                     with sleeptime : perl check_linux_stats.pl -N -w 1000,500,1 -c 20000,1000,10 -p eth0 -u Kb -s 10
     Processes virtual memory        : perl check_linux_stats.pl -T -w 9551820 -c 9551890 -p /var/run/sendmail.pid
 HELP
 }
@@ -726,6 +793,8 @@ sub check_options {
         'load'       => \$o_load,
         'F'          => \$o_file,
         'file'       => \$o_file,
+        'f:s'        => \$o_statfile,
+        'statfile:s' => \$o_statfile,
         'S'          => \$o_socket,
         'socket'     => \$o_socket,
         'W'          => \$o_paging,
