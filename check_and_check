@@ -1,0 +1,185 @@
+#!/usr/bin/env perl
+
+# A check to compare multiple checks by a AND algorithm
+
+# Copyright (C) 2012, NETWAYS GmbH, Markus Frosch <markus.frosch@netways.de>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+# 04.07.2012
+
+use strict;
+use Getopt::Long;
+#use Data::Dumper;
+
+our @COMMANDS = ();
+our $METHOD = undef;
+our $HELP = undef;
+our $PROGNAME = $0;
+
+###
+# SUBS
+###
+
+sub print_usage {
+  my $message = shift;
+  print $message."\n" if $message;
+  print STDERR "\n";
+	print STDERR "Usage: $PROGNAME -m best|worst <command> ...\n";
+  print STDERR "\n";
+	exit 255;
+}
+
+sub print_help {
+	print "\n";
+	print STDERR "Usage: $PROGNAME -m best|worst <command> ...\n";
+	print "\n";
+	print " Options:\n";
+	print "  -m best|worst    use best or worst returncode if they\n";
+	print "                   are not the same\n";
+  print "\n";
+  exit 127;
+}
+
+sub main {
+	GetOptions(
+             "m=s"      => \$METHOD,
+             "help"     => \$HELP,
+  ) or print_usage();
+
+  print_help() if($HELP);
+  print_usage("missing method") if(!$METHOD);
+  print_usage("invalid method") if(!($METHOD =~ m/^(best|worst)$/));
+
+	@COMMANDS=@ARGV;
+	print_usage("please specify at least 2 commands!") if (!(@COMMANDS >= 2));
+
+	my @RESULTS = ();
+	my @RCODES = ();
+	my $checks_ok = 0;
+	my $checks_warn = 0;
+	my $checks_crit = 0;
+	my $checks_unknown = 0;
+
+	my $counter = 0;
+	foreach(@COMMANDS) {
+		my $command = $_;
+		my $routput;
+		my $rcode;
+		$counter++;
+
+		# run it
+		$routput = `$command`;
+		$rcode = $?;
+		if($rcode == -1) {
+			print "UNKNOWN - command no. $counter failed: $!";
+		}
+		$rcode = $rcode >> 8;
+		$checks_ok++ if $rcode == 0;
+		$checks_warn++ if $rcode == 1;
+		$checks_crit++ if $rcode == 2;
+		$checks_unknown++ if $rcode >= 3;
+
+		push(@RESULTS, $routput);
+		push(@RCODES, $rcode);
+	}
+
+	# prepare return
+	my $RCODE;
+	my $MESSAGE;
+
+	# if any unknown
+	if($checks_unknown > 0) {
+		$RCODE = 3;
+		$MESSAGE = "$checks_unknown checks unknown!";
+	}
+	else {
+		# handle method best
+		if($METHOD eq "best") {
+			# if all checks ok
+			if($checks_ok > 0 and $checks_warn == 0 and $checks_crit == 0) {
+				$RCODE = 0;
+				$MESSAGE = "$checks_ok checks ok";
+			}
+			# if some checks ok
+			elsif($checks_ok > 0) {
+				$RCODE = 0;
+				$MESSAGE = "$checks_ok checks ok";
+				$MESSAGE .= ", $checks_warn checks warning" if $checks_warn > 0;
+				$MESSAGE .= ", $checks_crit checks critical" if $checks_crit > 0;
+			}
+			# if some warnings - but none ok
+			elsif($checks_warn > 0) { 
+				$RCODE = 1;
+				$MESSAGE = "$checks_warn checks warning";
+				$MESSAGE .= ", $checks_ok checks ok" if $checks_ok > 0;
+			}
+			# else only criticals
+			else {
+				$RCODE = 2;
+				$MESSAGE = "$checks_crit checks critical";
+			}
+		}
+		elsif($METHOD eq "worst") {
+			# if all checks crit
+			if($checks_ok == 0 and $checks_warn == 0 and $checks_crit > 0) {
+				$RCODE = 2;
+				$MESSAGE = "$checks_crit checks critical";
+			}
+			# if some checks crit
+			elsif($checks_crit > 0) {
+				$RCODE = 2;
+				$MESSAGE = "$checks_crit checks crit";
+				$MESSAGE .= ", $checks_warn checks warning" if $checks_warn > 0;
+				$MESSAGE .= ", $checks_ok checks ok" if $checks_ok > 0;
+			}
+			# if some warnings - but none crit
+			elsif($checks_warn > 0) { 
+				$RCODE = 1;
+				$MESSAGE = "$checks_warn checks warning";
+				$MESSAGE .= ", $checks_ok checks ok" if $checks_ok > 0;
+			}
+			# else only criticals
+			else {
+				$RCODE = 0;
+				$MESSAGE = "$checks_ok checks ok";
+			}
+		}
+		else { print "method $METHOD not implemented!\n"; exit 5; }
+	}
+
+	# longoutput all results and seperate perfdata
+	my $LONGOUTPUT = "";
+	my $PERFDATA = "";
+	$counter = 0;
+	foreach(@RESULTS) {
+		my ($res, $perf) = split(/\|/, $_,2);
+		$res =~ s/\r?\n/ /g;
+		$LONGOUTPUT .= "[$counter] ".$res."\n";
+		$perf =~ s/\r?\n/ /g;
+		$PERFDATA .= "$perf ";
+		$counter++;
+	}
+
+	# print and exit
+	my @STATE = ("OK", "WARNING", "CRITICAL", "UNKNOWN");
+	print $STATE[$RCODE]." - ".$MESSAGE."\n";
+	print $LONGOUTPUT;
+	print " | $PERFDATA\n" if $PERFDATA;
+	exit $RCODE;
+}
+
+main;
+
