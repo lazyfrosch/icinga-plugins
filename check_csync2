@@ -29,18 +29,18 @@ fi
 
 # check for locally changed files
 OUT=`sudo $CSYNC2 -M 2>&1`
-if [ $? -ne 0 ]; then
+if [ $? -gt 3 ]; then
     echo "UNKNOWN - could not check for modified files:"
     echo "$OUT"
     exit 3
 else
     lines=`echo "$OUT" | wc -l`
-    if [ $lines -gt 0 ]; then
+    if [ "$OUT" != "" ]; then
         echo "WARNING - found $lines modified files, please check and sync them:"
         echo "$OUT"
         exit 1
     else
-        echo "WARNING - found no modified files"
+        echo "OK - found no modified files"
         exit 0
     fi
 fi
