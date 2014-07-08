@@ -1,0 +1,47 @@
+#!/bin/bash
+#################################################
+# check_csync2
+#
+# This script checks if the csync peers are
+# up2date.
+#
+# You will need the following sudo rights:
+# nagios ALL = (root) NOPASSWD: /usr/sbin/csync2 -cr /
+# nagios ALL = (root) NOPASSWD: /usr/sbin/csync2 -M
+# nagios ALL = (root) NOPASSWD: /usr/sbin/csync2 -T
+#
+# Version 0.1 (draft)
+#
+# (c) 2014 NETWAYS GmbH <info@netways.de>
+#     2014 Markus Frosch <markus@lazyfrosch.de>
+#
+#################################################
+
+OUT=""
+CSYNC2=/usr/sbin/csync2
+
+# update the hint database
+OUT=`sudo $CSYNC2 -cr / 2>&1`
+if [ $? -ne 0 ]; then
+    echo "UNKNOWN - could not update hint db!"
+    exit 3
+fi
+
+# check for locally changed files
+OUT=`sudo $CSYNC2 -M 2>&1`
+if [ $? -ne 0 ]; then
+    echo "UNKNOWN - could not check for modified files:"
+    echo "$OUT"
+    exit 3
+else
+    lines=`echo "$OUT" | wc -l`
+    if [ $lines -gt 0 ]; then
+        echo "WARNING - found $lines modified files, please check and sync them:"
+        echo "$OUT"
+        exit 1
+    else
+        echo "WARNING - found no modified files"
+        exit 0
+    fi
+fi
+
