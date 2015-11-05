@@ -316,31 +316,35 @@ sub check_mem {
     if ( defined( $mem ) ) {
         $status = "OK";
 
-        my ( $mem_crit, $swap_crit ) = split( /,/, $o_critical );
-        my ( $mem_warn, $swap_warn ) = split( /,/, $o_warning );
+        my ( $mem_crit_pct, $swap_crit_pct ) = split( /,/, $o_critical );
+        my ( $mem_warn_pct, $swap_warn_pct ) = split( /,/, $o_warning );
 
-        my $memused =
-          sprintf( "%.2f", ( $mem->{memused} / $mem->{memtotal} ) * 100 );
-        my $memcached =
-          sprintf( "%.2f", ( $mem->{cached} / $mem->{memtotal} ) * 100 );
-        my $swapused =
-          sprintf( "%.2f", ( $mem->{swapused} / $mem->{swaptotal} ) * 100 );
-        my $swapcached =
-          sprintf( "%.2f", ( $mem->{swapcached} / $mem->{swaptotal} ) * 100 );
-        my $active =
-          sprintf( "%.2f", ( $mem->{active} / $mem->{memtotal} ) * 100 );
+        my $mem_warn_abs  = sprintf("%.2f", $mem_warn_pct  / 100 * $mem->{memtotal});
+        my $mem_crit_abs  = sprintf("%.2f", $mem_crit_pct  / 100 * $mem->{memtotal});
+        my $swap_warn_abs = sprintf("%.2f", $swap_warn_pct / 100 * $mem->{swaptotal});
+        my $swap_crit_abs = sprintf("%.2f", $swap_crit_pct / 100 * $mem->{swaptotal});
+        my $real_memused  = $mem->{memused} - $mem->{cached} - $mem->{buffers};
 
-        if ( ( $memused >= $mem_crit ) || ( $swapused >= $swap_crit ) ) {
+        my $memtotal_mb   = sprintf("%.2f", $mem->{memtotal} / 1024.0);
+        my $memused_mb    = sprintf("%.2f", $real_memused / 1024.0);
+        my $swaptotal_mb  = sprintf("%.2f", $mem->{swaptotal} / 1024.0);
+        my $swapused_mb   = sprintf("%.2f", $mem->{swapused} / 1024.0);
+
+        if ( ( $real_memused >= $mem_crit_abs ) || ( $mem->{swapused} >= $swap_crit_abs ) ) {
             $status = "CRITICAL";
         }
-        elsif ( ( $memused >= $mem_warn ) || ( $swapused >= $swap_warn ) ) {
+        elsif ( ( $real_memused >= $mem_warn_abs ) || ( $mem->{swapused} >= $swap_warn_abs ) ) {
             $status = "WARNING";
         }
 
-        print "MEMORY $status : Mem used: $memused%, Swap used: $swapused% | ".
-              "MemUsed=$memused%;$mem_warn;$mem_crit ".
-              "SwapUsed=$swapused;$swap_warn;$swap_crit MemCached=$memcached ".
-              "SwapCached=$swapcached Active=$active";
+        print "$status - Memory used: ${memused_mb}MB / ${memtotal_mb}MB, ".
+              "Swap used: ${swapused_mb}MB / ${swaptotal_mb}MB | ".
+              "MemUsed=${real_memused}KB;${mem_warn_abs};${mem_crit_abs};0;$mem->{memtotal} ".
+              "MemCached=$mem->{cached}KB ".
+              "SwapUsed=$mem->{swapused}KB;${swap_warn_abs};${swap_crit_abs};0;$mem->{swaptotal} ".
+              "SwapCached=$mem->{swapcached}KB ".
+              "Active=$mem->{active}KB ".
+              "Committed=$mem->{committed_as}KB";
     }
     else {
         print "No data";
