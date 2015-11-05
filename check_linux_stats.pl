@@ -51,9 +51,17 @@
 use lib "/usr/lib/nagios/plugins";
 use utils qw($TIMEOUT %ERRORS &print_revision &support);
 use Getopt::Long;
-use Sys::Statistics::Linux;
-use Sys::Statistics::Linux::Processes;
+use Sys::Statistics::Linux::CpuStats;
+use Sys::Statistics::Linux::DiskStats;
+use Sys::Statistics::Linux::DiskUsage;
+use Sys::Statistics::Linux::FileStats;
+use Sys::Statistics::Linux::LoadAVG;
+use Sys::Statistics::Linux::MemStats;
 use Sys::Statistics::Linux::NetStats;
+use Sys::Statistics::Linux::PgSwStats;
+use Sys::Statistics::Linux::ProcStats;
+use Sys::Statistics::Linux::Processes;
+use Sys::Statistics::Linux::SockStats;
 use Data::Dumper;
 
 use vars qw($script_name $script_version $o_sleep $o_pattern $o_cpu
@@ -124,14 +132,23 @@ print "\n";
 exit $ERRORS{$status};
 
 sub check_cpu {
-    my $lxs = Sys::Statistics::Linux->new( cpustats => 1 );
-    $lxs->init;
-    sleep $o_sleep;
-    my $stat = $lxs->get;
+    my $stat;
+    my $lxs;
+    if(defined($o_statfile)) {
+        $lxs = Sys::Statistics::Linux::CpuStats->new(initfile => $o_statfile);
+        $lxs->init;
+        $stat = $lxs->get;
+    }
+    else {
+        $lxs = Sys::Statistics::Linux::CpuStats->new;
+        $lxs->init;
+        sleep $o_sleep;
+        $stat = $lxs->get;
+    }
 
-    if ( defined( $stat->cpustats ) ) {
+    if ( defined( $stat ) ) {
         $status = "OK";
-        my $cpu = $stat->cpustats->{cpu};
+        my $cpu = $stat->{cpu};
         my $cpu_used = sprintf( "%.2f", ( 100 - $cpu->{idle} ) );
 
         if ( $cpu_used >= $o_critical ) {
@@ -150,14 +167,22 @@ sub check_cpu {
 }
 
 sub check_procs {
-    my $lxs = Sys::Statistics::Linux->new( procstats => 1 );
-    $lxs->init;
-    sleep $o_sleep;
-    my $stat = $lxs->get;
+    my $procs;
+    my $lxs;
+    if(defined($o_statfile)) {
+        $lxs = Sys::Statistics::Linux::ProcStats->new(initfile => $o_statfile);
+        $lxs->init;
+        $procs = $lxs->get;
+    }
+    else {
+        $lxs = Sys::Statistics::Linux::ProcStats->new;
+        $lxs->init;
+        sleep $o_sleep;
+        $procs = $lxs->get;
+    }
 
-    if ( defined( $stat->procstats ) ) {
+    if ( defined( $procs ) ) {
         $status = "OK";
-        my $procs = $stat->procstats;
 
         if ( $procs->{count} >= $o_critical ) {
             $status = "CRITICAL";
@@ -233,14 +258,11 @@ sub check_process {
 }
 
 sub check_socket {
-    my $lxs = Sys::Statistics::Linux->new( sockstats => 1 );
-    $lxs->init;
-    sleep $o_sleep;
-    my $stat = $lxs->get;
+    my $lxs  = Sys::Statistics::Linux::SockStats->new;
+    my $socks = $lxs->get;
 
-    if ( defined( $stat->sockstats ) ) {
+    if ( defined( $socks ) ) {
         $status = "OK";
-        my $socks = $stat->sockstats;
 
         if ( $socks->{used} >= $o_critical ) {
             $status = "CRITICAL";
@@ -258,14 +280,11 @@ sub check_socket {
 }
 
 sub check_file {
-    my $lxs = Sys::Statistics::Linux->new( filestats => 1 );
-    $lxs->init;
-    sleep $o_sleep;
-    my $stat = $lxs->get;
+    my $lxs = Sys::Statistics::Linux::FileStats->new;
+    my $file = $lxs->get;
 
-    if ( defined( $stat->filestats ) ) {
+    if ( defined( $file ) ) {
         $status = "OK";
-        my $file = $stat->filestats;
 
         my ( $fh_crit, $inode_crit ) = split( /,/, $o_critical );
         my ( $fh_warn, $inode_warn ) = split( /,/, $o_warning );
@@ -291,18 +310,15 @@ sub check_file {
 }
 
 sub check_mem {
-    my $lxs = Sys::Statistics::Linux->new( memstats => 1 );
-    $lxs->init;
-    sleep $o_sleep;
-    my $stat = $lxs->get;
+    my $lxs = Sys::Statistics::Linux::MemStats->new;
+    my $mem = $lxs->get;
 
-    if ( defined( $stat->memstats ) ) {
+    if ( defined( $mem ) ) {
         $status = "OK";
 
         my ( $mem_crit, $swap_crit ) = split( /,/, $o_critical );
         my ( $mem_warn, $swap_warn ) = split( /,/, $o_warning );
 
-        my $mem = $stat->memstats;
         my $memused =
           sprintf( "%.2f", ( $mem->{memused} / $mem->{memtotal} ) * 100 );
         my $memcached =
@@ -332,17 +348,14 @@ sub check_mem {
 }
 
 sub check_disk {
-    my $lxs = Sys::Statistics::Linux->new( diskusage => 1 );
-    $lxs->init;
-    sleep $o_sleep;
-    my $stat       = $lxs->get;
+    my $lxs  = Sys::Statistics::Linux::DiskUsage->new;
+    my $disk = $lxs->get;
     my $return_str = "";
     my $perfdata   = "";
 
-    if ( defined( $stat->diskusage ) ) {
+    if ( defined( $disk ) ) {
         $status = "OK";
 
-        my $disk = $stat->diskusage;
         if ( !defined($o_pattern) ) { $o_pattern = 'all'; }
 
         my $checkthis;
@@ -421,17 +434,26 @@ sub check_disk {
 }
 
 sub check_io {
-    my $lxs = Sys::Statistics::Linux->new( diskstats => 1 );
-    $lxs->init;
-    sleep $o_sleep;
-    my $stat       = $lxs->get;
+    my $disk;
+    my $lxs;
+    if(defined($o_statfile)) {
+        $lxs = Sys::Statistics::Linux::DiskStats->new(initfile => $o_statfile);
+        $lxs->init;
+        $disk = $lxs->get;
+    }
+    else {
+        $lxs = Sys::Statistics::Linux::DiskStats->new;
+        $lxs->init;
+        sleep $o_sleep;
+        $disk = $lxs->get;
+    }
+
     my $return_str = "io :";
     my $perfdata   = "";
 
-    if ( defined( $stat->diskstats ) ) {
+    if ( defined( $disk ) ) {
         $status = "OK";
 
-        my $disk = $stat->diskstats;
         if ( !defined($o_pattern) ) { $o_pattern = 'all'; }
 
         my $checkthis;
@@ -503,26 +525,24 @@ sub check_io {
 }
 
 sub check_net {
-    my $stat;
+    my $net;
     my $lxs;
     if(defined($o_statfile)) {
         $lxs = Sys::Statistics::Linux::NetStats->new(initfile => $o_statfile);
         $lxs->init;
-        $stat = $lxs->get;
+        $net = $lxs->get;
     }
     else {
-        $lxs = Sys::Statistics::Linux->new( netstats => 1 );
+        $lxs = Sys::Statistics::Linux::NetStats->new;
         $lxs->init;
         sleep $o_sleep;
-        $stat = $lxs->get;
-        $stat = $stat->netstats;
+        $net = $lxs->get;
     }
 
     my $return_str = "";
     my $perfdata   = "";
-    if ( defined( $stat ) ) {
+    if ( defined( $net ) ) {
         $status = "UNKOWN";
-        my $net = $stat;
         if ( !defined($o_pattern) ) { $o_pattern = 'all'; }
 
         my $checkthis;
@@ -615,14 +635,11 @@ sub check_net {
 }
 
 sub check_load {
-    my $lxs = Sys::Statistics::Linux->new( loadavg => 1 );
-    $lxs->init;
-    sleep $o_sleep;
-    my $stat = $lxs->get;
+    my $lxs = Sys::Statistics::Linux::LoadAVG->new;
+    my $load = $lxs->get;
 
-    if ( defined( $stat->loadavg ) ) {
+    if ( defined( $load) ) {
         $status = "OK";
-        my $load = $stat->loadavg;
         my ( $warn_1, $warn_5, $warn_15 ) = split( /,/, $o_warning );
         my ( $crit_1, $crit_5, $crit_15 ) = split( /,/, $o_critical );
 
@@ -650,13 +667,22 @@ sub check_load {
 }
 
 sub check_paging {
-    my $lxs = Sys::Statistics::Linux->new( pgswstats => 1 );
-    $lxs->init;
-    sleep $o_sleep;
-    my $stat = $lxs->get;
-    if ( defined( $stat->pgswstats ) ) {
+    my $page;
+    my $lxs;
+    if(defined($o_statfile)) {
+        $lxs = Sys::Statistics::Linux::PgSwStats->new(initfile => $o_statfile);
+        $lxs->init;
+        $page = $lxs->get;
+    }
+    else {
+        $lxs = Sys::Statistics::Linux::PgSwStats->new;
+        $lxs->init;
+        sleep $o_sleep;
+        $page = $lxs->get;
+    }
+
+    if ( defined( $page ) ) {
         $status = "OK";
-        my $page = $stat->pgswstats;
         my ( $warn_in, $warn_out ) = split( /,/, $o_warning );
         my ( $crit_in, $crit_out ) = split( /,/, $o_critical );
         if (   ( $page->{pgpgin} >= $crit_in )
@@ -679,13 +705,22 @@ sub check_paging {
 }
 
 sub check_swapping {
-    my $lxs = Sys::Statistics::Linux->new( pgswstats => 1 );
-    $lxs->init;
-    sleep $o_sleep;
-    my $stat = $lxs->get;
-    if ( defined( $stat->pgswstats ) ) {
+    my $page;
+    my $lxs;
+    if(defined($o_statfile)) {
+        $lxs = Sys::Statistics::Linux::PgSwStats->new(initfile => $o_statfile);
+        $lxs->init;
+        $page = $lxs->get;
+    }
+    else {
+        $lxs = Sys::Statistics::Linux::PgSwStats->new;
+        $lxs->init;
+        sleep $o_sleep;
+        $page = $lxs->get;
+    }
+
+    if ( defined( $page ) ) {
         $status = "OK";
-        my $page = $stat->pgswstats;
         my ( $warn_in, $warn_out ) = split( /,/, $o_warning );
         my ( $crit_in, $crit_out ) = split( /,/, $o_critical );
         if (   ( $page->{pswpin} >= $crit_in )
