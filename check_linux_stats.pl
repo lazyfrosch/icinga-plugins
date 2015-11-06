@@ -149,17 +149,22 @@ sub check_cpu {
     if ( defined( $stat ) ) {
         $status = "OK";
         my $cpu = $stat->{cpu};
-        my $cpu_used = sprintf( "%.2f", ( 100 - $cpu->{idle} ) );
 
-        if ( $cpu_used >= $o_critical ) {
+        if ( $cpu->{total} >= $o_critical ) {
             $status = "CRITICAL";
         }
-        elsif ( $cpu_used >= $o_warning ) {
+        elsif ( $cpu->{total} >= $o_warning ) {
             $status = "WARNING";
         }
-        print "CPU $status : idle $cpu->{idle}% | ".
-              "user=$cpu->{user}% system=$cpu->{system}% ".
-              "iowait=$cpu->{iowait}% idle=$cpu->{idle}%;$o_warning;$o_critical";
+        print "$status - CPU Usage: $cpu->{total}% | ".
+              "cpu=$cpu->{total}%;$o_warning;$o_critical;0;100 ".
+              "system=$cpu->{system}% ".
+              "user=$cpu->{user}% ".
+              "iowait=$cpu->{iowait}% ".
+              "nice=$cpu->{nice}% ".
+              "irq=$cpu->{irq}% ".
+              "softirq=$cpu->{softirq}%";
+        print " steal:$cpu->{steal}%" if ( defined ( $cpu->{steal} ) );
     }
     else {
         print "No data";
