@@ -86,6 +86,9 @@ my $status = 'UNKNOWN';
 # ---------------------------- main ----------------------------- #
 check_options();
 
+$o_warning  = convert_units($o_warning);
+$o_critical = convert_units($o_critical);
+
 if ($o_cpu) {
     check_cpu();
 }
@@ -130,6 +133,35 @@ else {
 print "\n";
 
 exit $ERRORS{$status};
+
+sub convert_units {
+    my $conv_str = shift @_;
+    unless ( $conv_str =~ /\d+(K|M|G|T)(i)?/ ) {
+        die "You can use only K, Ki, M, Mi, G, Gi, T, Ti convertion units!"
+    }
+    my @result_array;
+    my @tmp = split(/,/, $conv_str);
+    foreach my $item (@tmp) {
+        if ($item =~ /^(\d+)K$/) {
+            push @result_array, int($1) * 1000;
+        } elsif ($item =~ /^(\d+)Ki$/) {
+            push @result_array, int($1) * 1024;
+        } elsif ($item =~ /^(\d+)M$/) {
+            push @result_array, $1 * 1000 * 1000;
+        } elsif ($item =~ /^(\d+)Mi$/) {
+            push @result_array, int($1) * 1024 * 1024;
+        } elsif ($item =~ /^(\d+)G$/) {
+            push @result_array, int($1) * 1000 * 1000 * 1000;
+        } elsif ($item =~ /^(\d+)Gi$/) {
+            push @result_array, int($1) * 1024 * 1024 * 1024;
+        } elsif ($item =~ /^(\d+)T$/) {
+            push @result_array, int($1) * 1000 * 1000 * 1000 * 1000;
+        } elsif ($item =~ /^(\d+)Ti$/) {
+            push @result_array, int($1) * 1024 * 1024 * 1024 * 1024;
+        }
+    }
+    return join(',', @result_array);
+}
 
 sub check_cpu {
     my $stat;
