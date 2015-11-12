@@ -136,7 +136,7 @@ exit $ERRORS{$status};
 
 sub convert_units {
     my $conv_str = shift @_;
-    unless ( $conv_str =~ /\d+(K|M|G|T)(i)?/ ) {
+    unless ( $conv_str =~ /\d+((K|M|G|T)(i)?)?/ ) {
         die "You can use only K, Ki, M, Mi, G, Gi, T, Ti convertion units!"
     }
     my @result_array;
@@ -158,6 +158,8 @@ sub convert_units {
             push @result_array, int($1) * 1000 * 1000 * 1000 * 1000;
         } elsif ($item =~ /^(\d+)Ti$/) {
             push @result_array, int($1) * 1024 * 1024 * 1024 * 1024;
+        } else { # case without units
+            push @result_array, int($item);
         }
     }
     return join(',', @result_array);
