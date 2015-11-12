@@ -457,7 +457,7 @@ sub check_io {
         $disk = $lxs->get;
     }
 
-    my $return_str = "io :";
+    my $return_str = "";
     my $perfdata   = "";
 
     if ( defined( $disk ) ) {
@@ -476,60 +476,75 @@ sub check_io {
         foreach my $device ( keys(%$disk) ) {
             my $rdreq  = $disk->{$device}->{rdreq};
             my $wrtreq = $disk->{$device}->{wrtreq};
-            my $ttreq  = $disk->{$device}->{ttreq};
             my $rdbyt  = $disk->{$device}->{rdbyt};
             my $wrtbyt = $disk->{$device}->{wrtbyt};
-            my $ttbyt  = $disk->{$device}->{ttbyt};
 
-            if ( $o_unit =~ /BYTES/i ) {
-                if (   defined( $checkthis->{$device} )
-                    || defined( $checkthis->{all} ) )
-                {
-                    if (   ( $rdbyt >= $read_crit )
-                        || ( $wrtbyt >= $write_crit ) )
-                    {
-                        $crit++;
-                    }
-                    elsif (( $rdbyt >= $read_warn )
-                        || ( $wrtbyt >= $write_warn ) )
-                    {
-                        $warn++;
-                    }
-
-                    $perfdata .= " "
-                      . $device
-                      . "_read=$rdbyt;$read_warn;$read_crit "
-                      . $device
-                      . "_write=$wrtbyt;$write_warn;$write_crit";
+            if (   defined( $checkthis->{$device} )
+                || defined( $checkthis->{all} ) )
+            {
+                if ( $o_unit =~ /BYTES/i ) {
+                        if (   ( $rdbyt >= $read_crit )
+                            || ( $wrtbyt >= $write_crit ) )
+                        {
+                            $crit++;
+                        }
+                        elsif (( $rdbyt >= $read_warn )
+                            || ( $wrtbyt >= $write_warn ) )
+                        {
+                            $warn++;
+                        }
+                        $perfdata .= " "
+                            . $device
+                            . "_read=${rdbyt}B;$read_warn;$read_crit "
+                            . $device
+                            . "_write=${wrtbyt}B;$write_warn;$write_crit "
+                            . $device
+                            . "_read_req=$rdreq "
+                            . $device
+                            . "_write_req=$wrtreq";
+                } else {
+                        if (   ( $rdreq >= $read_crit )
+                            || ( $wrtreq >= $write_crit ) )
+                        {
+                            $crit++;
+                        }
+                        elsif (( $rdreq >= $read_warn )
+                            || ( $wrtreq >= $write_warn ) )
+                        {
+                            $warn++;
+                        }
+                        $perfdata .= " "
+                            . $device
+                            . "_read_req=$rdreq;$read_warn;$read_crit "
+                            . $device
+                            . "_write_req=$wrtreq;$write_warn;$write_crit "
+                            . $device
+                            . "_read=${rdbyt}B "
+                            . $device
+                            . "_write=${wrtbyt}B";
                 }
+                my $rdbyt_kb  = sprintf("%.2f", $rdbyt / 1024);
+                my $wrtbyt_kb = sprintf("%.2f", $wrtbyt / 1024);
+                $return_str .= " "
+                    . "$device: "
+                    . "${rdbyt_kb}kB/sec read, "
+                    . "${wrtbyt_kb}kB/sec write, "
+                    . "${rdreq}req/sec read, "
+                    . "${wrtreq}req/sec write;";
             }
-            else {
-                if (   defined( $checkthis->{$device} )
-                    || defined( $checkthis->{all} ) )
-                {
-                    if (   ( $rdreq >= $read_crit )
-                        || ( $wrtreq >= $write_crit ) )
-                    {
-                        $crit++;
-                    }
-                    elsif (( $rdreq >= $read_warn )
-                        || ( $wrtreq >= $write_warn ) )
-                    {
-                        $warn++;
-                    }
 
-                    $perfdata .= " "
-                      . $device
-                      . "_read=$rdreq;$read_warn;$read_crit "
-                      . $device
-                      . "_write=$wrtreq;$write_warn;$write_crit";
-                }
-            }
+
         }
         if    ( $crit > 0 ) { $status = "CRITICAL"; }
         elsif ( $warn > 0 ) { $status = "WARNING"; }
 
-        print "DISK $status $return_str |$perfdata";
+        if ( length($return_str) == 0 ) {
+            $status = "CRITICAL";
+            print "$status - Block device not found: $o_pattern";
+        } else {
+            $return_str = substr($return_str, 0, -1);
+            print "$status -$return_str |$perfdata";
+        }
     }
 }
 
