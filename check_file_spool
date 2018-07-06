@@ -1,0 +1,324 @@
+#!/usr/bin/perl
+=head1 NAME
+
+check_file_spool - checks files in a spool directory
+
+=head1 DESCRIPTION
+
+Nagios/Icinga plugin to check if a spool directory contains
+old files, that might not have been processed.
+
+=head1 LICENSE
+
+Copyright (c) 2015 NETWAYS GmbH <info@netways.de>
+
+Copyright (c) 2015 Markus Frosch <markus.frosch@netways.de>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=head1 SYNPOSIS
+
+check_file_spool -p /var/spool/something [-m seen] [...]
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--help>
+
+Print this help
+
+=item B<--path, -p>
+
+Path of the spool directory to monitor.
+
+=item B<--mode, -m>
+
+Mode of the check, either `seen` or `mtime`.
+
+While mtime just checks the mtime of the file, `seen` takes note when the
+script has seen the file for the first time. And saves that timestamp
+to a `seenfile`.
+
+Default: seen
+
+=item B<--warning, -w>
+
+Warning age for a file, in minutes.
+
+Default: 30
+
+=item B<--critical, -c>
+
+Critical age for a file, in minutes.
+
+Default: 60
+
+=item B<--seenfile>
+
+Where to save the state of seen files, the filename will be suffixed by a
+hash, representing the monitored path.
+
+Default: /var/tmp/check_file_spool
+
+=item B<--ignore-zero, Z>
+
+Ignore files that have a size of zero bytes.
+
+=back
+=cut
+
+use warnings;
+use strict;
+use Pod::Usage;
+use Getopt::Long qw(:config no_ignore_case bundling);
+use Data::Dumper;
+use Digest::SHA1 qw(sha1_hex);
+
+my $PATH;
+my $WARNING  = 30;
+my $CRITICAL = 60;
+my $MODE = 'seen';
+my $SEENFILE = "/var/tmp/check_file_spool";
+my $IGNOREZERO = 0;
+
+my $STATENAMES = {
+    0 => 'OK',
+    1 => 'WARNING',
+    2 => 'CRITICAL',
+    3 => 'UNKNOWN',
+};
+
+sub exit_error {
+    printf "UNKNOWN - %s\n", shift;
+    pod2usage(3) if shift;
+    exit(3);
+}
+
+sub parse_options {
+    my $help;
+    GetOptions(
+      "help|h"        => \$help,
+      "path|p=s"      => \$PATH,
+      "mode|m=s"      => \$MODE,
+      "warning|w=i"   => \$WARNING,
+      "critical|c=i"  => \$CRITICAL,
+      "seenfile=s"    => \$SEENFILE,
+      "ignore-zero|Z" => \$IGNOREZERO,
+    ) or exit_error("illegal command line arguments!", 1);
+
+    pod2usage(
+        -verbose => 2,
+        -exitval => 3
+    ) if $help;
+
+    exit_error("you need to specify a path!", 1) if !$PATH;
+}
+
+# return a list of files that are present in the directory
+sub get_file_list {
+    exit_error("Path '$PATH' is not a directory!") if !-d $PATH;
+
+    opendir (my $dir, $PATH)
+        or exit_error("could not open dir '$PATH': $!");
+
+    my $files = ();
+    while (my $file = readdir($dir)) {
+        next if $file =~ /^\./;
+        next if !-f "$PATH/$file";
+
+        next if ($IGNOREZERO and -s "$PATH/$file" == 0);
+
+        push @$files, $file;
+    }
+    closedir $dir;
+    return $files;
+}
+
+# get a hash added filename for the seenfile
+sub get_seen_filename() {
+    return $SEENFILE."_".sha1_hex($PATH);
+}
+
+# read data from the seenfile
+sub get_seen_file() {
+    my $sf = get_seen_filename();
+    my $data = {};
+    if (-f $sf) {
+        open SEENDATA, "<", $sf
+            or exit_error("could not open seenfile for reading '$sf': $!");
+        {
+            local $/;
+            my $VAR1;
+            eval <SEENDATA>;
+            $data = $VAR1;
+        }
+        close SEENDATA;
+        return $data;
+    }
+    else {
+        return $data;
+    }
+}
+
+# persist data to the seenfile
+sub save_seen_file {
+    my $data = shift;
+    my $sf = get_seen_filename();
+
+    open SEENDATA, ">", $sf
+        or exit_error("could not open seenfile for saving '$sf': $!");
+
+    print SEENDATA Dumper($data);
+    close SEENDATA;
+}
+
+sub get_pretty_age {
+    my $age = shift;
+
+    my @p;
+    my $i = int($age / 60);
+    my $c;
+    if ($i >= 0) {
+        unshift @p, ($i%60)."m";
+        $i = int($i/60);
+    }
+    if ($i > 0) {
+        unshift @p, ($i%24)."h";
+        $i = int($i/24);
+    }
+    if ($i > 0) {
+        unshift @p, ($i)."d";
+    }
+    return join(" ", @p);
+}
+
+sub main {
+    parse_options();
+
+    # fill list of files to a hash
+    my $files = {};
+    my $fl = get_file_list();
+    foreach(@$fl) {
+        $files->{$_} = {
+            path => "$PATH/$_",
+        };
+    }
+
+    if ($MODE eq "mtime") {
+        # compare mtime against now
+        my $now = time();
+        foreach my $f (keys %$files) {
+            my $file = $files->{$f};
+            my @fstat = stat($file->{path})
+                or exit_error("could not stat file '$f': $!");
+            $file->{mtime} = $fstat[9];
+            $file->{age} = $now - $file->{mtime};
+        }
+    }
+    elsif ($MODE eq "seen") {
+        # get data from seenfile
+        my $seen = get_seen_file();
+
+        # refresh timestamps
+        my $now = time();
+        foreach my $f (keys %$files) {
+            my $file = $files->{$f};
+            if (!exists $seen->{$f}) {
+                $seen->{$f} = {
+                    seen_ts => $now,
+                };
+            }
+            $file->{seen_ts} = $seen->{$f}->{seen_ts};
+            $file->{age} = $now - $file->{seen_ts};
+        }
+        # remove nonexisting files from seen
+        foreach (keys %$seen) {
+            if (!exists $files->{$_}) {
+                delete $seen->{$_};
+            }
+        }
+
+        # save to seen file
+        save_seen_file($seen);
+    }
+    else {
+        exit_error("mode '$MODE' is not implemented!");
+    }
+
+    # compare age
+    my @warning = ();
+    my @critical = ();
+    my @ok = ();
+    foreach my $f (keys %$files) {
+        my $age = $files->{$f}->{age};
+
+        if (($age / 60) > $CRITICAL) {
+            push @critical, $f;
+        }
+        elsif (($age / 60) > $WARNING) {
+            push @warning, $f;
+        }
+        else {
+            push @ok, $f;
+        }
+    }
+
+    # build summary text
+    my $state = 3;
+    my @summary;
+    if (scalar(keys %$files) == 0) {
+        $state = 0;
+        push @summary, "No files in spool directory";
+    }
+    else {
+        if (@critical > 0) {
+            $state = 2;
+            push @summary, sprintf("%d files of critical age", scalar @critical);
+        }
+        if (@warning > 0) {
+            $state = 1 if $state == 3;
+            push @summary, sprintf("%d files of warning age", scalar @warning);
+        }
+        if (@ok > 0) {
+            $state = 0 if $state == 3;
+            push @summary, sprintf("%d files within age limits", scalar @ok);
+        }
+    }
+
+    # print out summary
+    printf "%s - %s\n", $STATENAMES->{$state}, join(", ", @summary);
+
+    # show details on files
+    foreach (@critical) {
+        print "[CRITICAL] $_ ";
+        print get_pretty_age($files->{$_}->{age});
+        print "\n";
+    }
+    foreach (@warning) {
+        print "[WARNING] $_ ";
+        print get_pretty_age($files->{$_}->{age});
+        print "\n";
+    }
+    foreach (@ok) {
+        print "[OK] $_ ";
+        print get_pretty_age($files->{$_}->{age});
+        print "\n";
+    }
+
+    exit($state);
+}
+main;
+
+# vi: ts=4 sw=4 expandtab :
